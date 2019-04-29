@@ -9,6 +9,12 @@
 #define DELAY 1000000
 #define TIMER_DELAY 630
 
+#define LED0 BIT3 // GREEN
+
+#define LED1 BIT1 // RED
+
+unsigned int value=0;
+
 char seg[16];
 char d[5];
 char digit;
@@ -42,18 +48,11 @@ void display_BCD(unsigned short v)
   }
 }
 
-#pragma vector = TIMER0_A0_VECTOR
-__interrupt void myTimerISR(void)
-{
-  digit = ++digit % NUMBER_OF_DIGITS;   //use MOD operator
-  P2OUT = ~seg[d[digit]];
-  P1OUT = 1 << (digit + 6);
-}
 
 void init(void)
 {
   // Stop watchdog timer to prevent time out reset
-  WDTCTL = WDTPW + WDTHOLD;
+  //WDTCTL = WDTPW + WDTHOLD;
 
   // initialize Timer0_A
   TA0CCR0 = TIMER_DELAY;                  // set up terminal count
@@ -66,7 +65,7 @@ void init(void)
   P2SEL  &= ~BIT7;
   P2SEL2 &= ~BIT6;
   P2SEL2 &= ~BIT7;
-  P1DIR  = 0xFF;       // enable segment outputs
+  P1DIR  = BIT6 + BIT7;       // enable segment outputs
   P2DIR  = 0xFF;   // enable digit select
 
   // create 7-segment table
@@ -92,50 +91,8 @@ void init(void)
 
 void main( void )
 {
-    /*
-    //TACTL
-    BCSCTL3 |= LFXT1S_2;                      // ACLK = VLO
     WDTCTL = WDT_ADLY_16;                     // WDT 16ms, ACLK, interval timer (if the WDT were running at 32 kHz, it would be 1/16 ms)
-    IE1 |= WDTIE;                             // Enable WDT interrupt
-
-    P2DIR |= BIT3;                            // Set P1.6 to output direction 1.6 is RED
-    P2SEL |= BIT3;                            // Set P1.6 to primary function (output for TA1.0)
-    P2SEL2 &= ~BIT3;                          // Ensure secondary function isn't enabled
-
-    P2DIR |= BIT1;                            // Set P2.2 to output direction 2.1 is green
-    P2SEL |= BIT1;                            // Set P2.2 to primary function
-    P2SEL2 &= ~BIT1;                          // Ensure secondary function isn't enable
-
-    P2DIR |= BIT5;                            // Set P2.2 to output direction 2.5 is blue
-    P2SEL |= BIT5;                            // Set P2.2 to primary function
-    P2SEL2 &= ~BIT5;                          // Ensure secondary function isn't enable
-
-    TA1CCR0 = 100;                            // Set upper bound for counter of Timer A1 to 100 (120 Hz)                           // Set duty cycle of Timer A1 to 100/100 (pin on 100% of period)
-    TA0CCR0 = 100;                            // Set upper bound for counter of Timer A0 to 100 (120 Hz)                         // Set duty cycle of Timer A1 to 0/100 (pin on 0% of period)
-
-    TA1CCR1 = 0;
-    TA1CCR2 = 0;
-    TA0CCR1 = 0;
-    TA0CCTL1 = OUTMOD_3;                      // Set timer to PWM set/reset mode (on for 0 -> CCR1, off for CCR1 -> CCR0)
-    TA1CCTL1 = OUTMOD_3;                      // Set timer to PWM set/reset mode (on for 0 -> CCR1, off for CCR1 -> CCR0)
-    TA1CCTL2 = OUTMOD_3;
-    TA1CTL |= TASSEL_1 + MC_1;                // Chooses ACLK as the source and sets the timer in up mode
-    TA0CTL |= TASSEL_1 + MC_1;                // Chooses ACLK as the source and sets the timer in up mode
-
-    //int dir = 1;                              // Flag to know whether pin controlled by TA0 is counting up or down
-    ADC10CTL0 &= ~ENC;
-    ADC10CTL1 = INCH_0 + ADC10DIV_3 + ADC10SSEL_1;         // Temp Sensor ADC10CLK/4
-    ADC10CTL0 = SREF_1 + ADC10SHT_3 + REFON + ADC10ON + ADC10IE + REF2_5V;
-    ADC10AE0 |= BIT1;
-    */
-    //SREF_1 means use internal reference
-    int test = 1;
-    int temp = 0;
-    int centered;
-    int init_temp;
-    int red, blue, green;
-    // Code from https://www.embeddedrelated.com/showarticle/199.php begins
-    WDTCTL = WDTPW + WDTHOLD; // Stop WDT
+    init();
 
     BCSCTL1 = CALBC1_1MHZ; // Set range
 
@@ -143,81 +100,53 @@ void main( void )
 
     BCSCTL2 &= ~(DIVS_3); // SMCLK = DCO = 1MHz
 
-    //P1DIR |= LED0 + LED1;
+    P2DIR |= LED0 + LED1;
 
-    P1SEL |= BIT1; //ADC Input pin P1.1
+    P1SEL |= BIT1;
+    P2OUT &= ~(LED0 + LED1);
+    /* Configure ADC Channel */
 
-    //P1OUT &= ~(LED0 + LED1);
-    ADC10CTL1 = INCH_5 + ADC10DIV_3 ; // Channel 5, ADC10CLK/4
+    ADC10CTL1 = INCH_1 + ADC10DIV_3 ; // Channel 5, ADC10CLK/4
 
     ADC10CTL0 = SREF_0 + ADC10SHT_3 + ADC10ON + ADC10IE; //Vcc & Vss as reference
 
-    ADC10AE0 |= BIT2; //P1.5 ADC option
-    __enable_interrupt();
-    // Code from website mentioned above ends
-    /*
-    __bis_SR_register(GIE);                   // Enables interrupts
-    ADC10CTL0 |= ENC + ADC10SC;               // Sampling and conversion start
-    __bis_SR_register(CPUOFF + GIE);          // LPM0 with interrupts enabled
-    init_temp = ADC10MEM;
-    */
-    while (1) {
-        //__delay_cycles(1000); // Wait for ADC Ref to settle
+    ADC10AE0 |= BIT1; //P1.1 ADC option
+    int state = 0;
+    __enable_interrupt(); // Enable interrupts.
+    while(1)
 
-        ADC10CTL0 |= ENC + ADC10SC; // Sampling and conversion start
+      {
 
-        __bis_SR_register(CPUOFF + GIE); // LPM0 with interrupts enabled
+         //__delay_cycles(1000); // Wait for ADC Ref to settle
 
-        test = ADC10MEM;
+         ADC10CTL0 |= ENC + ADC10SC; // Sampling and conversion start
 
-        //TA1CCR2 is blue, TA0CCR1 is green, TA1CCR1 is red
+         __bis_SR_register(CPUOFF + GIE); // LPM0 with interrupts enabled
 
-        /*
-        if (temp >= init_temp - 7) {
-          TA1CCR2 = 100;
-          TA0CCR1 = 0;
-          TA1CCR1 = 0;
-        } else if (temp >= init_temp - 12 && temp <= init_temp -7) {
-          TA1CCR2 = 100;
-          TA0CCR1 = 100;
-          TA1CCR1 = 0;
-        } else if (temp >= init_temp - 16 && temp <= init_temp -12) {
-          TA1CCR2 = 0;
-          TA0CCR1 = 100;
-          TA1CCR1 = 0;
-        } else if (temp >= init_temp - 19 && temp <= init_temp -16) {
-          TA1CCR2 = 0;
-          TA0CCR1 = 100;
-          TA1CCR1 = 100;
-        } else{
-          TA1CCR2 = 0;
-          TA0CCR1 = 0;
-          TA1CCR1 = 100;
-        }
-        */
-        if ((temp < 500) && (test == 1)) {
-            // blue
-            TA1CCR2 = 0;
-            TA0CCR1 = 0;
-            TA1CCR1 = 100;
-            temp = 60;
-            //test = 1;
-            //__delay_cycles(250000);
-        } else {
-            /*
-            TA1CCR2 = 100;
-            TA0CCR1 = 0;
-            TA1CCR1 = 0;
-            */
-            // red
-            TA1CCR2 = 100;
-            TA0CCR1 = 100;
-            TA1CCR1 = 100;
-            test = 0;
-            //__delay_cycles(250000);
-        }
-        //__bis_SR_register(LPM3_bits);         // Enter LPM3 w/interrupt
-    }
+         value = ADC10MEM;
+
+         if (value<850 && state == 0)
+
+         {
+
+            P2OUT &= ~(LED0 + LED1);
+
+            P2OUT |= LED0;
+
+         }
+
+         else
+
+         {
+
+            P2OUT &= ~(LED0 + LED1);
+
+            P2OUT |= LED1;
+            state = 1;
+
+         }
+
+      }
  /*
  unsigned int n;
  init();
@@ -238,6 +167,14 @@ void main( void )
  }
  */
 
+}
+
+#pragma vector = TIMER0_A0_VECTOR
+__interrupt void myTimerISR(void)
+{
+  digit = ++digit % NUMBER_OF_DIGITS;   //use MOD operator
+  //P2OUT = ~seg[d[digit]];
+  //P1OUT = 1 << (digit + 6);
 }
 
 // Watchdog Timer interrupt service routine
