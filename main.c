@@ -18,7 +18,7 @@ unsigned int value=0;
 char seg[16];
 char d[5];
 char digit;
-
+int state;
 // simple software delay
 void delay(unsigned long d)
 {
@@ -49,7 +49,7 @@ void display_BCD(unsigned short v)
 }
 
 
-void init(void)
+void init_seg_display(void)
 {
   // Stop watchdog timer to prevent time out reset
   //WDTCTL = WDTPW + WDTHOLD;
@@ -89,61 +89,65 @@ void init(void)
   digit = 0;
 }
 
-void main( void )
-{
-    WDTCTL = WDT_ADLY_16;                     // WDT 16ms, ACLK, interval timer (if the WDT were running at 32 kHz, it would be 1/16 ms)
-    init();
-
+void init_accelerometer(void) {
     BCSCTL1 = CALBC1_1MHZ; // Set range
-
     DCOCTL = CALDCO_1MHZ;
-
     BCSCTL2 &= ~(DIVS_3); // SMCLK = DCO = 1MHz
 
     P2DIR |= LED0 + LED1;
-
     P1SEL |= BIT1;
-    P2OUT &= ~(LED0 + LED1);
+    P2OUT &= ~(LED0 + LED1 + BIT5);
     /* Configure ADC Channel */
 
-    ADC10CTL1 = INCH_1 + ADC10DIV_3 ; // Channel 5, ADC10CLK/4
-
+    ADC10CTL1 = INCH_1 + ADC10DIV_3 ; // Channel 1, ADC10CLK/4
     ADC10CTL0 = SREF_0 + ADC10SHT_3 + ADC10ON + ADC10IE; //Vcc & Vss as reference
-
     ADC10AE0 |= BIT1; //P1.1 ADC option
-    int state = 0;
+}
+
+void init_button(void) {
+    P1DIR &= ~BIT3;
+    P1OUT |= BIT3;
+    P1REN |= BIT3;
+    P1IES |= BIT3;
+    P1IE  |= BIT3;
+    P1IFG &= ~BIT3;
+}
+
+void main( void )
+{
+    WDTCTL = WDT_ADLY_16;                     // WDT 16ms, ACLK, interval timer (if the WDT were running at 32 kHz, it would be 1/16 ms)
+    init_seg_display();
+    init_accelerometer();
+    init_button();
+    state = 0;
+    int counter = 0;
     __enable_interrupt(); // Enable interrupts.
-    while(1)
 
-      {
-
+    while(1) {
          //__delay_cycles(1000); // Wait for ADC Ref to settle
 
          ADC10CTL0 |= ENC + ADC10SC; // Sampling and conversion start
-
          __bis_SR_register(CPUOFF + GIE); // LPM0 with interrupts enabled
-
          value = ADC10MEM;
 
-         if (value<850 && state == 0)
+         if (state == 0) {
+             P2OUT &= ~(LED0 + LED1);
+             P2OUT |= LED0;
 
-         {
-
-            P2OUT &= ~(LED0 + LED1);
-
-            P2OUT |= LED0;
-
+         } else {
+             if (value<950 && state == 1) {
+                P2OUT &= ~(LED0 + LED1);
+                P2OUT |= LED0;
+             } else {
+                P2OUT &= ~(LED0 + LED1);
+                P2OUT |= LED1;
+                state = 2;
+             }
          }
-
-         else
-
-         {
-
-            P2OUT &= ~(LED0 + LED1);
-
-            P2OUT |= LED1;
-            state = 1;
-
+         if (state == 1) {
+             counter += 1;
+             // current issue: watchdog timer not working to wake up system (not going into interrupt? haven't checked)
+             //__bis_SR_register(CPUOFF + GIE);
          }
 
       }
@@ -187,7 +191,7 @@ void __attribute__ ((interrupt(WDT_VECTOR))) watchdog_timer (void)
 #error Compiler not supported!
 #endif
 {
-    __bic_SR_register_on_exit(LPM3_bits);     // On exit of ISR, clear bits in status register to leave LPM3
+    __bic_SR_register_on_exit(CPUOFF);     // On exit of ISR, clear bits in status register to leave LPM3
 }
 
 //From adc10_temp example
@@ -203,3 +207,26 @@ void __attribute__ ((interrupt(ADC10_VECTOR))) ADC10_ISR (void)
 {
   __bic_SR_register_on_exit(CPUOFF);        // Clear CPUOFF bit from 0(SR)
 }
+
+// Button interrupt service routine
+#if defined(__TI_COMPILER_VERSION__) || defined(__IAR_SYSTEMS_ICC__)
+#pragma vector=PORT1_VECTOR
+__interrupt void Port_1 (void)
+#elif defined(__GNUC__)
+void __attribute__ ((interrupt(PORT1_VECTOR))) Port_1 (void)
+#else
+#error Compiler not supported!
+#endif
+{
+    P2IE  &= ~BIT3;      // Disable interrupts while ISR running
+    // Wait to Exit ISR Until Finger Lifted
+    while((P1IN & BIT3) == 0x00){
+        // Sets duty cycle to 50%
+    }
+    state = 1;
+    //TA1CCR1 = 0;
+    P1IFG &= ~(BIT3);
+    P1IE  |= BIT3;       // Re-enable interrupts
+
+}
+
