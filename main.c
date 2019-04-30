@@ -1,4 +1,5 @@
 #include <msp430.h> 
+#include <math.h>
 
 //--------------------------------------------------------
 // Project #2 - Multiplexed Seven-segment LED interface
@@ -123,12 +124,12 @@ void init_button(void) {
 
 void main( void )
 {
-    BCSCTL3 |= LFXT1S_2;
-    WDTCTL = WDT_ADLY_16;                     // WDT 16ms
-    IE1 |= WDTIE;
+    //BCSCTL3 |= LFXT1S_2;
+    WDTCTL = WDTPW + WDTHOLD;
+    //WDTCTL = WDT_ADLY_16;                     // WDT 16ms
+    //IE1 |= WDTIE;
 
     init_accelerometer();
-
     init_seg_display();
     init_button();
     state = 0;
@@ -137,15 +138,17 @@ void main( void )
     __enable_interrupt(); // Enable interrupts.
 
     while(1) {
-         //__delay_cycles(1000); // Wait for ADC Ref to settle
+
+
 
          ADC10CTL0 |= ENC + ADC10SC; // Sampling and conversion start
-         __bis_SR_register(CPUOFF + GIE); // LPM0 with interrupts enabled
+         //__bis_SR_register(CPUOFF + GIE); // LPM0 with interrupts enabled
+         __delay_cycles(50);
          value = ADC10MEM;
+
          // state 0: waiting to start
          if (state == 0) {
              display_BCD(23);
-
          } else if (state == 1){ // state 1: start counting, set counter to 0, go to state 2
                  count = 0;
                  cur_counting = 1;
@@ -154,33 +157,15 @@ void main( void )
          } else if (state == 2) {
              if (value > 900) {
                 cur_counting = 0;
-                display_BCD(count);
+                count = count / 20;
                 state = 3;
              }
          } else {
-             while(1);
+             display_BCD(count);
+             //while(1);
          }
 
-
       }
-
-
-/*
- unsigned int n;
-
- n = 0;
-
-
- while (1)
- {
-
-
-   n++;
-   display_BCD(n);
-   __delay_cycles(1000000);
-
- }
-*/
 
 }
 
@@ -190,6 +175,9 @@ __interrupt void myTimerISR(void)
   digit = ++digit % NUMBER_OF_DIGITS;   //use MOD operator
   P2OUT = ~seg[d[digit]];
   P1OUT = 1 << (digit + 6);
+  if (cur_counting == 1) {
+     count++;
+  }
 
 
 }
@@ -204,10 +192,8 @@ void __attribute__ ((interrupt(WDT_VECTOR))) watchdog_timer (void)
 #error Compiler not supported!
 #endif
 {
-    __bic_SR_register_on_exit(CPUOFF);     // On exit of ISR, clear bits in status register to leave LPM3
-    if (cur_counting == 1) {
-       count++;
-    }
+    //__bic_SR_register_on_exit(CPUOFF);     // On exit of ISR, clear bits in status register to leave LPM3
+
 
 }
 
@@ -222,7 +208,7 @@ void __attribute__ ((interrupt(ADC10_VECTOR))) ADC10_ISR (void)
 #error Compiler not supported!
 #endif
 {
-  __bic_SR_register_on_exit(CPUOFF);        // Clear CPUOFF bit from 0(SR)
+  //__bic_SR_register_on_exit(CPUOFF);        // Clear CPUOFF bit from 0(SR)
 }
 
 // Button interrupt service routine
