@@ -19,6 +19,8 @@ char seg[16];
 char d[5];
 char digit;
 int state;
+int count = 0;
+char cur_counting;
 // simple software delay
 void delay(unsigned long d)
 {
@@ -62,9 +64,9 @@ void init_seg_display(void)
   TA0CCTL0 |= CCIE;   // enable timer interrupts
   __enable_interrupt();    // set GIE in SR
   P2SEL  &= ~BIT6;
-  P2SEL  &= ~BIT7;
   P2SEL2 &= ~BIT6;
-  P2SEL2 &= ~BIT7;
+  P2SEL  &= ~BIT1;
+  P2SEL2 &= ~BIT1;
   P1DIR  = BIT6 + BIT7;       // enable segment outputs
   P2DIR  = 0xFF;   // enable digit select
 
@@ -94,9 +96,9 @@ void init_accelerometer(void) {
     DCOCTL = CALDCO_1MHZ;
     BCSCTL2 &= ~(DIVS_3); // SMCLK = DCO = 1MHz
 
-    P2DIR |= LED0 + LED1;
+    //P2DIR |= LED0 + LED1;
     P1SEL |= BIT1;
-    P2OUT &= ~(LED0 + LED1 + BIT5);
+    //P2OUT &= ~(LED0 + LED1 + BIT5);
     /* Configure ADC Channel */
 
     ADC10CTL1 = INCH_1 + ADC10DIV_3 ; // Channel 1, ADC10CLK/4
@@ -105,22 +107,33 @@ void init_accelerometer(void) {
 }
 
 void init_button(void) {
-    P1DIR &= ~BIT3;
-    P1OUT |= BIT3;
-    P1REN |= BIT3;
-    P1IES |= BIT3;
-    P1IE  |= BIT3;
-    P1IFG &= ~BIT3;
+
+    P2SEL  &= ~BIT7;
+    P2SEL2 &= ~BIT7;
+
+
+    P2DIR &= ~BIT7;
+    P2OUT |= BIT7;
+    P2REN |= BIT7;
+    P2IES |= BIT7;
+    P2IE  |= BIT7;
+    P2IFG &= ~BIT7;
+
 }
 
 void main( void )
 {
-    WDTCTL = WDT_ADLY_16;                     // WDT 16ms, ACLK, interval timer (if the WDT were running at 32 kHz, it would be 1/16 ms)
-    init_seg_display();
+    BCSCTL3 |= LFXT1S_2;
+    WDTCTL = WDT_ADLY_16;                     // WDT 16ms
+    IE1 |= WDTIE;
+
     init_accelerometer();
+
+    init_seg_display();
     init_button();
     state = 0;
-    int counter = 0;
+    //int counter = 0;
+
     __enable_interrupt(); // Enable interrupts.
 
     while(1) {
@@ -129,47 +142,45 @@ void main( void )
          ADC10CTL0 |= ENC + ADC10SC; // Sampling and conversion start
          __bis_SR_register(CPUOFF + GIE); // LPM0 with interrupts enabled
          value = ADC10MEM;
-
+         // state 0: waiting to start
          if (state == 0) {
-             P2OUT &= ~(LED0 + LED1);
-             P2OUT |= LED0;
+             display_BCD(23);
 
-         } else {
-             if (value<950 && state == 1) {
-                P2OUT &= ~(LED0 + LED1);
-                P2OUT |= LED0;
-             } else {
-                P2OUT &= ~(LED0 + LED1);
-                P2OUT |= LED1;
-                state = 2;
+         } else if (state == 1){ // state 1: start counting, set counter to 0, go to state 2
+                 count = 0;
+                 cur_counting = 1;
+                 display_BCD(state);
+                 state = 2;
+         } else if (state == 2) {
+             if (value > 900) {
+                cur_counting = 0;
+                display_BCD(count);
+                state = 3;
              }
+         } else {
+             while(1);
          }
-         if (state == 1) {
-             counter += 1;
-             // current issue: watchdog timer not working to wake up system (not going into interrupt? haven't checked)
-             //__bis_SR_register(CPUOFF + GIE);
-         }
+
 
       }
- /*
+
+
+/*
  unsigned int n;
- init();
 
  n = 0;
 
 
  while (1)
  {
-   P2OUT = ~BIT5;
-   P1OUT |= BIT1;
-   P1OUT |= BIT0;
+
 
    n++;
    display_BCD(n);
    __delay_cycles(1000000);
 
  }
- */
+*/
 
 }
 
@@ -177,8 +188,10 @@ void main( void )
 __interrupt void myTimerISR(void)
 {
   digit = ++digit % NUMBER_OF_DIGITS;   //use MOD operator
-  //P2OUT = ~seg[d[digit]];
-  //P1OUT = 1 << (digit + 6);
+  P2OUT = ~seg[d[digit]];
+  P1OUT = 1 << (digit + 6);
+
+
 }
 
 // Watchdog Timer interrupt service routine
@@ -192,6 +205,10 @@ void __attribute__ ((interrupt(WDT_VECTOR))) watchdog_timer (void)
 #endif
 {
     __bic_SR_register_on_exit(CPUOFF);     // On exit of ISR, clear bits in status register to leave LPM3
+    if (cur_counting == 1) {
+       count++;
+    }
+
 }
 
 //From adc10_temp example
@@ -210,23 +227,24 @@ void __attribute__ ((interrupt(ADC10_VECTOR))) ADC10_ISR (void)
 
 // Button interrupt service routine
 #if defined(__TI_COMPILER_VERSION__) || defined(__IAR_SYSTEMS_ICC__)
-#pragma vector=PORT1_VECTOR
-__interrupt void Port_1 (void)
+#pragma vector=PORT2_VECTOR
+__interrupt void Port_2 (void)
 #elif defined(__GNUC__)
-void __attribute__ ((interrupt(PORT1_VECTOR))) Port_1 (void)
+void __attribute__ ((interrupt(PORT2_VECTOR))) Port_2 (void)
 #else
 #error Compiler not supported!
 #endif
 {
-    P2IE  &= ~BIT3;      // Disable interrupts while ISR running
+    P2IE  &= ~BIT7;      // Disable interrupts while ISR running
     // Wait to Exit ISR Until Finger Lifted
-    while((P1IN & BIT3) == 0x00){
+
+    while((P2IN & BIT7) == 0x00){
         // Sets duty cycle to 50%
     }
+
     state = 1;
-    //TA1CCR1 = 0;
-    P1IFG &= ~(BIT3);
-    P1IE  |= BIT3;       // Re-enable interrupts
+    P2IFG &= ~(BIT7);
+    P2IE  |= BIT7;       // Re-enable interrupts
 
 }
 
