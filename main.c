@@ -13,6 +13,10 @@
 
 #define LED1 BIT1 // RED
 
+#define K 0.148
+#define DEVICE_MASS 0.039
+#define GRAVITY 9.8
+
 unsigned int value=0;
 
 char seg[16];
@@ -83,11 +87,9 @@ void init_accelerometer(void) {
     DCOCTL = CALDCO_1MHZ;
     BCSCTL2 &= ~(DIVS_3); // SMCLK = DCO = 1MHz
 
-    //P2DIR |= LED0 + LED1;
     P1SEL |= BIT1;
-    //P2OUT &= ~(LED0 + LED1 + BIT5);
-    /* Configure ADC Channel */
 
+    /* Configure ADC Channel */
     ADC10CTL1 = INCH_1 + ADC10DIV_3 ; // Channel 1, ADC10CLK/4
     ADC10CTL0 = SREF_0 + ADC10SHT_3 + ADC10ON + ADC10IE; //Vcc & Vss as reference
     ADC10AE0 |= BIT1; //P1.1 ADC option
@@ -110,25 +112,19 @@ void init_button(void) {
 
 void main( void )
 {
-    //BCSCTL3 |= LFXT1S_2;
-    WDTCTL = WDTPW + WDTHOLD;
-    //WDTCTL = WDT_ADLY_16;                     // WDT 16ms
-    //IE1 |= WDTIE;
+    WDTCTL = WDTPW + WDTHOLD; // watchdog timer is unused, so turns it off
+
 
     init_accelerometer();
     init_seg_display();
     init_button();
     state = 0;
-    //int counter = 0;
 
-    __enable_interrupt(); // Enable interrupts.
+    __enable_interrupt();
 
     while(1) {
 
-
-
          ADC10CTL0 |= ENC + ADC10SC; // Sampling and conversion start
-         //__bis_SR_register(CPUOFF + GIE); // LPM0 with interrupts enabled
          __delay_cycles(50);
          value = ADC10MEM;
 
@@ -140,21 +136,21 @@ void main( void )
                  cur_counting = 1;
                  display_BCD(state);
                  state = 2;
-         } else if (state == 2) {
-             if (value > 975) {
+         } else if (state == 2) { // state 2: counting and waiting for impact
+             if (value > 975) { // transition to state 3: stop counting and compute value to output
                 cur_counting = 0;
-                count = (int) round((0.039/0.148)*log(cosh((count/200.0)/(sqrt(0.039/9.8))))*3 - 1.5);
+                count = (int) round((DEVICE_MASS/K)*log(cosh((count/200.0)/(sqrt(DEVICE_MASS/GRAVITY))))*3 - 1.5); // computation to output value in feet
                 state = 3;
              }
-         } else {
+         } else { // state 3: display computed value (feet dropped)
              display_BCD(count);
-             //while(1);
          }
 
       }
 
 }
 
+// Used to display the correct digits on each seven segment display
 #pragma vector = TIMER0_A0_VECTOR
 __interrupt void myTimerISR(void)
 {
@@ -168,7 +164,7 @@ __interrupt void myTimerISR(void)
 
 }
 
-// Watchdog Timer interrupt service routine
+// Watchdog Timer interrupt service routine,  not currently being used
 #if defined(__TI_COMPILER_VERSION__) || defined(__IAR_SYSTEMS_ICC__)
 #pragma vector=WDT_VECTOR                     // Do this ISR for interrupt vector from watchdog timer
 __interrupt void watchdog_timer(void)
@@ -183,8 +179,7 @@ void __attribute__ ((interrupt(WDT_VECTOR))) watchdog_timer (void)
 
 }
 
-//From adc10_temp example
-// ADC10 interrupt service routine
+// ADC10 interrupt service routine, not currently being used
 #if defined(__TI_COMPILER_VERSION__) || defined(__IAR_SYSTEMS_ICC__)
 #pragma vector=ADC10_VECTOR
 __interrupt void ADC10_ISR (void)
@@ -208,11 +203,9 @@ void __attribute__ ((interrupt(PORT2_VECTOR))) Port_2 (void)
 #endif
 {
     P2IE  &= ~BIT7;      // Disable interrupts while ISR running
-    // Wait to Exit ISR Until Finger Lifted
 
-    while((P2IN & BIT7) == 0x00){
-        // Sets duty cycle to 50%
-    }
+    // Wait to Exit ISR Until Finger Lifted
+    while((P2IN & BIT7) == 0x00);
 
     state = 1;
     P2IFG &= ~(BIT7);
