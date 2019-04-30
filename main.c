@@ -2,8 +2,7 @@
 #include <math.h>
 
 //--------------------------------------------------------
-// Project #2 - Multiplexed Seven-segment LED interface
-// 2013.06.11 - MrChips
+// Credit: Code for seven segment displays based off https://forum.allaboutcircuits.com/blog/msp430-multiplexed-7-segment-displays.559/
 //--------------------------------------------------------
 
 #define NUMBER_OF_DIGITS 2
@@ -22,24 +21,11 @@ char digit;
 int state;
 int count = 0;
 char cur_counting;
-// simple software delay
-void delay(unsigned long d)
-{
-  unsigned long i;
-  for (i = 0; i < d; i++);
-}
+float result;
 
-void display_hex(unsigned short v)
-{ // enter with 16-bit integer v
-  // fill global array d[ ]
-  short i;
-  for (i = 0; i < 4; i++)
-  {
-     d[i] = v % 16;
-     v = v/16;
-  }
-}
-
+/*
+ * Function to change value to be displayed by seven segment displays
+ */
 void display_BCD(unsigned short v)
 {// enter with 16-bit integer v
  // fill global array d[ ]
@@ -155,9 +141,9 @@ void main( void )
                  display_BCD(state);
                  state = 2;
          } else if (state == 2) {
-             if (value > 900) {
+             if (value > 975) {
                 cur_counting = 0;
-                count = count / 20;
+                count = (int) round((0.039/0.148)*log(cosh((count/200.0)/(sqrt(0.039/9.8))))*3 - 1.5);
                 state = 3;
              }
          } else {
